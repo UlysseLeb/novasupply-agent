@@ -1,0 +1,344 @@
+<title>NovaSupply Ops Agent</title>
+<style>
+/*
+  Palette : charbon + ambre (clin d'oeil AWS) comme accent principal,
+  teal comme second accent réservé au statut "donnée réelle branchée".
+  Layout : hub (agent) -> spoke (3 outils) en haut, puis stepper de phases en bas.
+*/
+:root{
+  --bg:#f6f4f0;
+  --surface:#ffffff;
+  --surface-2:#eeebe4;
+  --border:#ddd7cb;
+  --fg:#1c1a17;
+  --fg-muted:#716b5e;
+  --accent:#c2660b;
+  --accent-soft:#f3dcc2;
+  --accent-2:#1b8f7a;
+  --accent-2-soft:#d6ece7;
+  --stub:#9a927f;
+  --font-display:'Space Grotesk',system-ui,sans-serif;
+  --font-body:'Inter',system-ui,sans-serif;
+  --font-mono:'JetBrains Mono',ui-monospace,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#15130f;
+    --surface:#1f1c17;
+    --surface-2:#262219;
+    --border:#38332a;
+    --fg:#f2ede4;
+    --fg-muted:#aba290;
+    --accent:#e8923a;
+    --accent-soft:#3a2c17;
+    --accent-2:#4fc3ab;
+    --accent-2-soft:#17332d;
+    --stub:#716a5a;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#15130f;
+  --surface:#1f1c17;
+  --surface-2:#262219;
+  --border:#38332a;
+  --fg:#f2ede4;
+  --fg-muted:#aba290;
+  --accent:#e8923a;
+  --accent-soft:#3a2c17;
+  --accent-2:#4fc3ab;
+  --accent-2-soft:#17332d;
+  --stub:#716a5a;
+  color-scheme:dark;
+}
+*{box-sizing:border-box;}
+body{
+  background:var(--bg);
+  color:var(--fg);
+  font-family:var(--font-body);
+  padding-inline:16px;
+  padding-block:32px;
+  max-width:980px;
+  margin-inline:auto;
+}
+h1{
+  font-family:var(--font-display);
+  font-size:clamp(1.5rem,4vw,2.1rem);
+  margin:0 0 4px;
+  text-wrap:balance;
+}
+.subtitle{
+  color:var(--fg-muted);
+  font-size:.95rem;
+  margin:0 0 36px;
+  max-width:62ch;
+}
+.section-label{
+  font-family:var(--font-mono);
+  font-size:.72rem;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  color:var(--accent);
+  margin:0 0 14px;
+}
+/* ---- hub / spoke ---- */
+.hub-wrap{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:0;
+  margin-bottom:48px;
+}
+.node{
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:14px 18px;
+}
+.trigger{
+  font-family:var(--font-mono);
+  font-size:.82rem;
+  color:var(--fg-muted);
+  text-align:center;
+}
+.connector{
+  width:2px;
+  height:22px;
+  background:var(--border);
+}
+.agent-node{
+  text-align:center;
+  max-width:420px;
+  border-color:var(--accent);
+  box-shadow:0 0 0 3px var(--accent-soft);
+}
+.agent-node .tag{
+  font-family:var(--font-mono);
+  font-size:.68rem;
+  color:var(--accent);
+  letter-spacing:.06em;
+  text-transform:uppercase;
+}
+.agent-node h2{
+  font-family:var(--font-display);
+  font-size:1.15rem;
+  margin:4px 0 6px;
+}
+.agent-node p{
+  font-size:.85rem;
+  color:var(--fg-muted);
+  margin:0;
+}
+.bus{
+  width:100%;
+  max-width:760px;
+  height:2px;
+  background:var(--border);
+  position:relative;
+  margin-top:0;
+}
+.tools-row{
+  display:flex;
+  gap:20px;
+  width:100%;
+  max-width:760px;
+  flex-wrap:wrap;
+  justify-content:center;
+}
+.tool-col{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  flex:1 1 200px;
+  min-width:200px;
+}
+.tool-connector{
+  width:2px;
+  height:18px;
+  background:var(--border);
+}
+.tool-card{
+  width:100%;
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+.tool-card code{
+  font-family:var(--font-mono);
+  font-size:.82rem;
+  color:var(--fg);
+}
+.tool-card .desc{
+  font-size:.8rem;
+  color:var(--fg-muted);
+  line-height:1.4;
+}
+.badges{
+  display:flex;
+  gap:6px;
+  flex-wrap:wrap;
+}
+.badge{
+  font-family:var(--font-mono);
+  font-size:.66rem;
+  letter-spacing:.03em;
+  padding:3px 7px;
+  border-radius:99px;
+  white-space:nowrap;
+}
+.badge.stub{
+  background:var(--surface-2);
+  color:var(--stub);
+  border:1px dashed var(--stub);
+}
+.badge.real{
+  background:var(--accent-2-soft);
+  color:var(--accent-2);
+  border:1px solid var(--accent-2);
+}
+/* ---- phases ---- */
+.phases{
+  display:flex;
+  gap:0;
+  flex-wrap:wrap;
+  border-top:1px solid var(--border);
+  padding-top:28px;
+}
+.phase{
+  flex:1 1 200px;
+  padding:0 16px 0 0;
+  position:relative;
+}
+.phase:not(:first-child){
+  border-left:1px solid var(--border);
+  padding-left:16px;
+}
+.phase .num{
+  font-family:var(--font-mono);
+  font-size:.72rem;
+  color:var(--accent);
+  margin-bottom:6px;
+}
+.phase.current .num{color:var(--accent);font-weight:600;}
+.phase.current{
+  background:var(--accent-soft);
+  border-radius:8px;
+  margin:-10px;
+  padding:10px 16px 10px calc(16px + 10px);
+}
+.phase.current:not(:first-child){border-left-color:transparent;}
+.phase h3{
+  font-family:var(--font-display);
+  font-size:.95rem;
+  margin:0 0 6px;
+}
+.phase p{
+  font-size:.78rem;
+  color:var(--fg-muted);
+  margin:0;
+  line-height:1.45;
+}
+.legend{
+  display:flex;
+  gap:18px;
+  flex-wrap:wrap;
+  margin-top:40px;
+  padding-top:16px;
+  border-top:1px solid var(--border);
+  font-size:.78rem;
+  color:var(--fg-muted);
+}
+.legend span{display:inline-flex;align-items:center;gap:6px;}
+@media (max-width:640px){
+  .tools-row{flex-direction:column;align-items:stretch;}
+  .tool-col{min-width:0;}
+}
+</style>
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap">
+
+<h1>NovaSupply Ops Agent — le plan</h1>
+<p class="subtitle">Réécriture agentique de novasupply-inbox-ai : un agent qui choisit lui-même ses outils, au lieu d'un routage figé. Voici l'architecture cible et où on en est.</p>
+
+<p class="section-label">Architecture des outils</p>
+
+<div class="hub-wrap">
+  <div class="node trigger">Email client (triage novasupply-inbox-ai)</div>
+  <div class="connector"></div>
+  <div class="node agent-node">
+    <div class="tag">Strands Agent · Claude via Bedrock</div>
+    <h2>L'agent</h2>
+    <p>Lit l'email en entier, décide seul quels outils appeler et dans quel ordre, puis conclut : réponse, brouillon ou escalade.</p>
+  </div>
+  <div class="connector"></div>
+  <div class="bus"></div>
+  <div class="tools-row">
+
+    <div class="tool-col">
+      <div class="tool-connector"></div>
+      <div class="node tool-card">
+        <code>get_order_context()</code>
+        <div class="badges">
+          <span class="badge stub">Phase 0 : stub</span>
+          <span class="badge real">Phase 1 : HubSpot + DynamoDB</span>
+        </div>
+        <p class="desc">Commande (HubSpot) + expédition réelle simulée (DynamoDB <code>fulfillments</code>).</p>
+      </div>
+    </div>
+
+    <div class="tool-col">
+      <div class="tool-connector"></div>
+      <div class="node tool-card">
+        <code>search_policy()</code>
+        <div class="badges">
+          <span class="badge stub">Phase 0 : stub</span>
+          <span class="badge real">Phase 2 : Bedrock KB</span>
+        </div>
+        <p class="desc">RAG sur les procédures internes (remboursement, réclamation, menace légale), S3 + Bedrock Knowledge Base.</p>
+      </div>
+    </div>
+
+    <div class="tool-col">
+      <div class="tool-connector"></div>
+      <div class="node tool-card">
+        <code>escalate_to_human()</code>
+        <div class="badges">
+          <span class="badge stub">Phase 0 : stub</span>
+          <span class="badge real">Phase 1 : Ticket HubSpot</span>
+        </div>
+        <p class="desc">Crée un Ticket dans HubSpot (Service Hub) plutôt qu'une table dédiée.</p>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<p class="section-label">Roadmap par phases</p>
+
+<div class="phases">
+  <div class="phase current">
+    <div class="num">Phase 0 — on est ici</div>
+    <h3>Prototype local</h3>
+    <p>Agent Strands en local, les 3 outils stubbed (données codées en dur). Objectif : vérifier que le modèle choisit seul la bonne séquence, coût ≈ 0.</p>
+  </div>
+  <div class="phase">
+    <div class="num">Phase 1</div>
+    <h3>Déploiement serverless</h3>
+    <p>Lambda + API Gateway via CDK. Connexion réelle à HubSpot (lecture + Ticket). Table DynamoDB <code>fulfillments</code> seedée.</p>
+  </div>
+  <div class="phase">
+    <div class="num">Phase 2</div>
+    <h3>RAG réel</h3>
+    <p>Vraie Bedrock Knowledge Base sur de vrais documents de procédure. Remplace le stub <code>search_policy</code>.</p>
+  </div>
+  <div class="phase">
+    <div class="num">Phase 3</div>
+    <h3>Guardrails &amp; observabilité</h3>
+    <p>Bedrock Guardrail, table <code>traces</code> structurée, alerte de budget AWS.</p>
+  </div>
+</div>
+
+<div class="legend">
+  <span><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="var(--stub)"/></svg> pointillé = donnée simulée (stub)</span>
+  <span><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="var(--accent-2)"/></svg> plein = système réel déjà branché</span>
+</div>

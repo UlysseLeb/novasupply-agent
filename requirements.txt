@@ -1,0 +1,3 @@
+boto3==1.43.108
+botocore==1.43.108
+strands-agents==1.57.2
