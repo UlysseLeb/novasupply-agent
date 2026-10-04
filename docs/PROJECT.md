@@ -76,7 +76,15 @@ Bug rencontré et corrigé : le premier déploiement a échoué (`CREATE_FAILED`
 
 Validé : une requête avec un synonyme ("plainte" au lieu de "réclamation") retrouve le bon document par recherche sémantique, alors que le matching par mot-clé de la Phase 0/1 aurait échoué — testé en local et via l'API Lambda déployée. Cas ajouté à `src/evals.py`.
 
-Prochaine étape : Phase 3, guardrails et observabilité (Bedrock Guardrail, table `traces` structurée).
+**Phase 3 validée le 2026-10-04** : `CfnGuardrail` ajouté (sujet interdit "conseil juridique ou reconnaissance de responsabilité" calqué sur `knowledge-base/procedure-menace-legale.md`, détection PII en démo — email/téléphone anonymisés, numéro de carte bancaire bloqué). Branché sur l'agent via `BedrockModel(guardrail_id=..., guardrail_version="DRAFT")` : un filtre mécanique appliqué par Bedrock lui-même sur l'entrée et la sortie, indépendant du `system_prompt` que le modèle pourrait ne pas suivre à la lettre sur un cas limite.
+
+Validé par un test adversarial (pas juste un message normal, qui passait déjà sans broncher) : une injection de prompt demandant à l'agent de répéter mot pour mot une reconnaissance de responsabilité légale est bloquée (`stop_reason: guardrail_intervened`), en local et via l'API Lambda déployée. Le PII (email + téléphone communiqués par un client fictif) est anonymisé en `{EMAIL}`/`{PHONE}` dans la réponse.
+
+Table DynamoDB `traces` ajoutée pour l'observabilité : chaque requête Lambda écrit une ligne (`request_id`, `message`, outils appelés, `stop_reason`, latence) après avoir répondu au client — une écriture de trace qui échoue ne doit jamais faire échouer la vraie réponse (isolée dans son propre `try/except`). La fonction d'extraction des outils appelés (`tools_called`), déjà écrite dans `evals.py`, a été remontée dans `agents.py` pour être partagée entre les deux usages (évaluation et trace) plutôt que dupliquée.
+
+Cas Guardrail ajouté à `src/evals.py` : 5/5 cas notés réussis.
+
+**Roadmap initiale terminée.** Prochaine étape (hors roadmap d'origine) : évoluer vers AWS Bedrock AgentCore et/ou LangGraph pour un futur projet séparé (voir recherche marché FDE 2026 dans le second cerveau), ou resserrer le scope IAM si ce projet devait un jour tourner pour un vrai client.
 
 ## Liens
 

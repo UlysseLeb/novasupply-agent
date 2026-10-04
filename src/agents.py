@@ -15,9 +15,16 @@ def create_agent() -> Agent:
     """
     # Modèle explicite : Haiku 4.5 (le moins cher côté Claude) via le profil
     # d'inférence EU (eu-west-3), plutôt que le défaut Strands (Sonnet, us-west-2).
+    # guardrail_id/version : filtre appliqué par Bedrock lui-même sur l'entrée
+    # ET la sortie du modèle (Phase 3), indépendant du system_prompt — un
+    # garde-fou mécanique plutôt qu'une simple instruction que le modèle
+    # pourrait oublier sur un cas limite (ex: menace légale).
     model = BedrockModel(
         model_id="eu.anthropic.claude-haiku-4-5-20251001-v1:0",
         region_name="eu-west-3",
+        guardrail_id="v406mt0akphs",
+        guardrail_version="DRAFT",
+        guardrail_trace="enabled",
     )
 
     return Agent(
@@ -25,3 +32,18 @@ def create_agent() -> Agent:
         tools=[get_order_context, search_policy, escalate_to_human],
         system_prompt=SYSTEM_PROMPT,
     )
+
+
+def tools_called(agent: Agent) -> list[str]:
+    """Extrait les noms d'outils appelés depuis l'historique de la conversation.
+
+    Utilisé par evals.py (vérifier le comportement) et lambda_handler.py
+    (enregistrer la trace de la décision) : un seul endroit pour lire la
+    structure interne des messages Strands plutôt que la dupliquer.
+    """
+    return [
+        block["toolUse"]["name"]
+        for message in agent.messages
+        for block in message.get("content", [])
+        if "toolUse" in block
+    ]

@@ -19,6 +19,7 @@ from aws_cdk import aws_lambda as lambda_
 from constructs import Construct
 
 FULFILLMENTS_TABLE_NAME = "novasupply-agent-fulfillments"
+TRACES_TABLE_NAME = "novasupply-agent-traces"
 BEDROCK_MODEL_ID = "eu.anthropic.claude-haiku-4-5-20251001-v1:0"
 # Titan Embeddings v2, dimension par défaut 1024 : doit matcher la dimension
 # déclarée sur l'index S3 Vectors ci-dessous, sinon Bedrock refuse l'ingestion.
@@ -49,6 +50,60 @@ class NovaSupplyAgentStack(Stack):
             # réelle à protéger si on détruit et recrée la stack.
             removal_policy=RemovalPolicy.DESTROY,
         )
+
+        # Tracabilité des décisions de l'agent (Phase 3) : une ligne par requête,
+        # écrite par la Lambda elle-même après chaque appel à l'agent.
+        traces_table = dynamodb.Table(
+            self,
+            "TracesTable",
+            table_name=TRACES_TABLE_NAME,
+            partition_key=dynamodb.Attribute(name="request_id", type=dynamodb.AttributeType.STRING),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            removal_policy=RemovalPolicy.DESTROY,
+        )
+
+        # --- Phase 3 : Guardrail Bedrock ---
+        # Sujet interdit : l'agent ne doit jamais répondre sur le fond à une menace
+        # légale (voir knowledge-base/procedure-menace-legale.md), peu importe ce
+        # que le system prompt lui dit — un filtre mécanique après coup plutôt
+        # qu'une simple instruction que le modèle pourrait oublier sur un cas limite.
+        guardrail = bedrock.CfnGuardrail(
+            self,
+            "AgentGuardrail",
+            name="novasupply-agent-guardrail",
+            blocked_input_messaging="Cette demande ne peut pas être traitée automatiquement.",
+            blocked_outputs_messaging="Je ne peux pas répondre sur ce point ; un responsable va prendre le relais.",
+            topic_policy_config=bedrock.CfnGuardrail.TopicPolicyConfigProperty(
+                topics_config=[
+                    bedrock.CfnGuardrail.TopicConfigProperty(
+                        name="ConseilJuridiqueOuReconnaissanceDeResponsabilite",
+                        type="DENY",
+                        definition=(
+                            "Toute réponse qui donne un avis juridique, nie ou reconnaît une "
+                            "responsabilité légale, ou propose un geste commercial en échange "
+                            "du retrait d'une menace de poursuite judiciaire."
+                        ),
+                        examples=[
+                            "Nous reconnaissons notre faute et proposons un remboursement en échange du retrait de la plainte.",
+                            "Vous avez raison, nous sommes légalement responsables de ce défaut.",
+                            "Je vous conseille de ne pas poursuivre en justice car vous n'avez pas de dossier solide.",
+                        ],
+                    )
+                ]
+            ),
+            # PII en démo (pas un vrai besoin métier ici, mais la détection/masquage
+            # est le genre de garde-fou qu'on veut pouvoir démontrer) : un numéro de
+            # carte bancaire est bloqué, email/téléphone sont anonymisés plutôt que bloqués.
+            sensitive_information_policy_config=bedrock.CfnGuardrail.SensitiveInformationPolicyConfigProperty(
+                pii_entities_config=[
+                    bedrock.CfnGuardrail.PiiEntityConfigProperty(type="EMAIL", action="ANONYMIZE"),
+                    bedrock.CfnGuardrail.PiiEntityConfigProperty(type="PHONE", action="ANONYMIZE"),
+                    bedrock.CfnGuardrail.PiiEntityConfigProperty(type="CREDIT_DEBIT_CARD_NUMBER", action="BLOCK"),
+                ]
+            ),
+        )
+        self.guardrail_id = guardrail.attr_guardrail_id
+        CfnOutput(self, "GuardrailId", value=guardrail.attr_guardrail_id)
 
         # --- Phase 2 : Knowledge Base Bedrock sur les documents de procédure ---
 
@@ -160,6 +215,7 @@ class NovaSupplyAgentStack(Stack):
                 "API_KEY": os.environ["NOVASUPPLY_API_KEY"],
                 "HUBSPOT_PRIVATE_APP_TOKEN": os.environ["HUBSPOT_PRIVATE_APP_TOKEN"],
                 "KNOWLEDGE_BASE_ID": knowledge_base.attr_knowledge_base_id,
+                "GUARDRAIL_ID": guardrail.attr_guardrail_id,
             },
         )
         agent_function.add_to_role_policy(
@@ -168,8 +224,15 @@ class NovaSupplyAgentStack(Stack):
                 resources=[knowledge_base.attr_knowledge_base_arn],
             )
         )
+        agent_function.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["bedrock:ApplyGuardrail"],
+                resources=[guardrail.attr_guardrail_arn],
+            )
+        )
 
         fulfillments_table.grant_read_data(agent_function)
+        traces_table.grant_write_data(agent_function)
 
         # Scope volontairement large sur Bedrock (apprentissage) plutôt qu'un ARN
         # précis de profil d'inférence : à resserrer si ce projet passe en prod réelle.
