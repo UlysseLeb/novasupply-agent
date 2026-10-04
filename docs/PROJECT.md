@@ -62,9 +62,15 @@ Scaffold créé le 2026-10-03 sous le nom provisoire "Meridian Ops Agent" (clien
 
 **Phase 0 validée le 2026-10-04** : 3 outils stubbés (`src/tools.py`), agent Strands connecté à Claude Haiku 4.5 via Bedrock (profil d'inférence EU, région `eu-west-3`), testé sur 3 cas (`src/run_tests.py`). Résultat sur le cas test de référence (signal secondaire noyé dans une question anodine) : l'agent repère la plainte récurrente malgré la question sur le mot de passe, appelle `get_order_context`, trouve l'écart réel (2 capteurs manquants), et appelle `escalate_to_human`, sans aucune règle `if/else` écrite pour ce cas précis. Un cas test sans plainte explicite montre que l'agent escalade dès qu'il détecte un écart réel, même non signalé par le client : point de design à retrancher en Phase 3 (faut-il réserver l'escalade aux cas où le client exprime une insatisfaction ?).
 
-Compte AWS créé le 2026-10-04 : utilisateur IAM dédié `novasupply-agent-local` (`AmazonBedrockFullAccess`, clés d'accès locales via `aws configure`, jamais commitées), budget zero-spend configuré avant toute ressource.
+Compte AWS créé le 2026-10-04 : utilisateur IAM dédié `novasupply-agent-local` (budget zero-spend configuré avant toute ressource, clés d'accès locales via `aws configure`, jamais commitées). Policy élargie au-delà de `AmazonBedrockFullAccess` pour permettre le déploiement CDK (CloudFormation, Lambda, DynamoDB, API Gateway, IAM, S3, ECR, SSM) — scope volontairement plus large pour un compte perso de prototype, à resserrer si ce projet devait tourner pour un vrai client.
 
-Prochaine étape : Phase 1, packaging Lambda + CDK + connexion HubSpot réelle.
+**Phase 1 validée le 2026-10-04** : stack CDK (`infra/`) déployée sur `eu-west-3` — table DynamoDB `fulfillments`, Lambda (`src/lambda_handler.py`, packagée via `PythonFunction` + bundling Docker), API Gateway HTTP API, auth `X-API-Key` vérifiée manuellement dans le handler (les Usage Plans/API Keys natifs sont une fonctionnalité REST API v1, pas HTTP API v2). `get_order_context` et `escalate_to_human` appellent désormais le vrai HubSpot (`src/hubspot_client.py`) au lieu des mocks, en réutilisant exactement le modèle de données de `novasupply-inbox-ai` (dealname HubSpot = numéro de commande, référence produit encodée dans le nom du line item). Numéros de commande mock Phase 0 (`ORD-1042`, fictifs) remplacés par un vrai cas trouvé dans HubSpot : `CMD-4006` (10 CAP-100 commandés, 7 expédiés selon la table `fulfillments` seedée manuellement).
+
+Validation de bout en bout via `curl` sur l'URL API Gateway déployée : l'agent détecte l'écart réel, crée un vrai Ticket HubSpot (vérifié ensuite via l'API), le tout sans règle écrite pour ce cas précis.
+
+**Suite d'évaluation ajoutée le 2026-10-04** (`src/evals.py`) : contrairement à `run_tests.py` (lecture humaine du texte), ce script vérifie par assertion quels outils l'agent a réellement appelés pour chaque cas (extraction depuis `agent.messages`, blocs `toolUse`), et échoue si le comportement dérive. 4 cas : signal secondaire noyé, question de politique simple, question hors périmètre (aucun outil ne doit être appelé), et un cas informationnel (écart réel sans plainte explicite — hors score, comportement volontairement pas encore tranché).
+
+Prochaine étape : Phase 2, RAG réel via Bedrock Knowledge Base (remplacement du stub `search_policy`).
 
 ## Liens
 

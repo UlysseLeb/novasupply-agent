@@ -1,0 +1,227 @@
+<title>NovaSupply Ops Agent — infra</title>
+<style>
+/*
+  Palette : même identité que le schéma "plan" précédent (charbon + ambre,
+  clin d'œil AWS). Layout : deux bandes empilées (Phase 0 en haut, Phase 1
+  en bas), Lambda comme hub central de la Phase 1, avec Phase 2/3 accrochées
+  en pointillé au-dessus (pas encore construites).
+*/
+:root{
+  --bg:#f6f4f0;
+  --surface:#ffffff;
+  --border:#ddd7cb;
+  --fg:#1c1a17;
+  --fg-muted:#716b5e;
+  --accent:#c2660b;
+  --accent-soft:#f3dcc2;
+  --font-display:'Space Grotesk',system-ui,sans-serif;
+  --font-body:'Inter',system-ui,sans-serif;
+  --font-mono:'JetBrains Mono',ui-monospace,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#15130f;
+    --surface:#1f1c17;
+    --border:#38332a;
+    --fg:#f2ede4;
+    --fg-muted:#aba290;
+    --accent:#e8923a;
+    --accent-soft:#3a2c17;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#15130f;
+  --surface:#1f1c17;
+  --border:#38332a;
+  --fg:#f2ede4;
+  --fg-muted:#aba290;
+  --accent:#e8923a;
+  --accent-soft:#3a2c17;
+  color-scheme:dark;
+}
+*{box-sizing:border-box;}
+body{
+  background:var(--bg);
+  color:var(--fg);
+  font-family:var(--font-body);
+  padding-inline:16px;
+  padding-block:32px;
+  max-width:900px;
+  margin-inline:auto;
+}
+h1{
+  font-family:var(--font-display);
+  font-size:clamp(1.4rem,4vw,1.9rem);
+  margin:0 0 4px;
+  text-wrap:balance;
+}
+.subtitle{
+  color:var(--fg-muted);
+  font-size:.92rem;
+  margin:0 0 28px;
+  max-width:62ch;
+}
+figure{
+  margin:0 0 20px;
+}
+.diagram-scroll{
+  overflow-x:auto;
+  border:1px solid var(--border);
+  border-radius:12px;
+  background:var(--surface);
+  padding:12px;
+}
+.diagram-scroll svg{
+  display:block;
+  width:880px;
+  min-width:880px;
+  height:auto;
+  color:var(--fg);
+}
+figcaption{
+  font-size:.82rem;
+  color:var(--fg-muted);
+  margin-top:10px;
+  line-height:1.5;
+  max-width:68ch;
+}
+.legend{
+  display:flex;
+  gap:22px;
+  flex-wrap:wrap;
+  font-size:.78rem;
+  color:var(--fg-muted);
+  margin-top:4px;
+}
+.legend span{display:inline-flex;align-items:center;gap:7px;}
+.legend svg{flex:none;}
+.lane-tag{
+  font-family:var(--font-mono);
+  font-size:11px;
+  letter-spacing:.04em;
+  fill:var(--fg-muted);
+}
+.box-title{
+  font-family:var(--font-display);
+  font-size:13px;
+  font-weight:600;
+}
+.box-sub{
+  font-size:11px;
+  fill:var(--fg-muted);
+}
+.arrow-label{
+  font-family:var(--font-mono);
+  font-size:10.5px;
+  fill:var(--fg-muted);
+}
+</style>
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap">
+
+<h1>NovaSupply Ops Agent — l'infrastructure réelle</h1>
+<p class="subtitle">Pas le plan cette fois : ce qui tourne vraiment aujourd'hui, et ce qui reste à construire. Un seul composant traverse les deux phases sans changer.</p>
+
+<figure>
+  <div class="diagram-scroll">
+    <svg viewBox="0 0 880 540" role="img" aria-label="Phase 0 : un poste local appelle Bedrock directement, les autres outils sont mockés en mémoire. Phase 1 : un client appelle API Gateway, qui invoque une Lambda ; celle-ci appelle réellement Bedrock, DynamoDB et HubSpot. Les Phases 2 et 3 (Bedrock Knowledge Base, CloudWatch et Guardrails) sont prévues mais pas encore branchées.">
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+
+      <!-- Phase 0 : poste local -->
+      <text x="40" y="26" class="lane-tag">PHASE 0 — PROTOTYPE LOCAL (2026-10-03/04)</text>
+
+      <rect x="40" y="40" width="240" height="72" rx="10" fill="var(--surface)" stroke="currentColor" stroke-width="1.3"/>
+      <text x="160" y="63" text-anchor="middle" class="box-title">Poste local</text>
+      <text x="160" y="80" text-anchor="middle" class="box-sub">agent.py (Strands)</text>
+      <text x="160" y="97" text-anchor="middle" class="box-sub">outils → dict Python (mock)</text>
+
+      <rect x="420" y="40" width="200" height="72" rx="10" fill="var(--surface)" stroke="currentColor" stroke-width="1.3"/>
+      <text x="520" y="66" text-anchor="middle" class="box-title">Amazon Bedrock</text>
+      <text x="520" y="83" text-anchor="middle" class="box-sub">Claude Haiku 4.5</text>
+      <text x="520" y="98" text-anchor="middle" class="box-sub">eu-west-3</text>
+
+      <line x1="280" y1="76" x2="420" y2="76" stroke="currentColor" stroke-width="1.6" marker-end="url(#arrow)"/>
+      <text x="350" y="68" text-anchor="middle" class="arrow-label">InvokeModel</text>
+
+      <line x1="20" y1="132" x2="860" y2="132" stroke="var(--border)" stroke-width="1"/>
+      <text x="40" y="156" class="lane-tag">PHASE 1 — DÉPLOYÉ LE 2026-10-04</text>
+
+      <!-- Phase 2 / 3 : prévu, pointillé, accroché au-dessus de Lambda -->
+      <rect x="300" y="178" width="220" height="68" rx="10" fill="var(--surface)" stroke="currentColor" stroke-width="1.2" stroke-dasharray="5 4"/>
+      <text x="410" y="203" text-anchor="middle" class="box-title">S3 + Bedrock KB</text>
+      <text x="410" y="220" text-anchor="middle" class="box-sub">Phase 2 — prévu</text>
+      <text x="410" y="235" text-anchor="middle" class="box-sub">RAG pour search_policy</text>
+
+      <rect x="560" y="178" width="260" height="68" rx="10" fill="var(--surface)" stroke="currentColor" stroke-width="1.2" stroke-dasharray="5 4"/>
+      <text x="690" y="203" text-anchor="middle" class="box-title">CloudWatch + table traces</text>
+      <text x="690" y="220" text-anchor="middle" class="box-sub">+ Bedrock Guardrail</text>
+      <text x="690" y="235" text-anchor="middle" class="box-sub">Phase 3 — prévu</text>
+
+      <!-- Ligne principale : client -> API Gateway -> Lambda -->
+      <rect x="30" y="296" width="130" height="68" rx="10" fill="var(--surface)" stroke="currentColor" stroke-width="1.3"/>
+      <text x="95" y="322" text-anchor="middle" class="box-title">Client</text>
+      <text x="95" y="339" text-anchor="middle" class="box-sub">message support</text>
+
+      <rect x="230" y="296" width="170" height="68" rx="10" fill="var(--surface)" stroke="currentColor" stroke-width="1.3"/>
+      <text x="315" y="322" text-anchor="middle" class="box-title">API Gateway</text>
+      <text x="315" y="339" text-anchor="middle" class="box-sub">HTTP API</text>
+      <text x="315" y="353" text-anchor="middle" class="box-sub">eu-west-3</text>
+
+      <rect x="470" y="286" width="220" height="90" rx="10" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2.2"/>
+      <text x="580" y="316" text-anchor="middle" class="box-title">Lambda</text>
+      <text x="580" y="333" text-anchor="middle" class="box-sub">create_agent()</text>
+      <text x="580" y="348" text-anchor="middle" class="box-sub">Strands Agent</text>
+      <text x="580" y="363" text-anchor="middle" class="box-sub">X-API-Key vérifiée ici</text>
+
+      <line x1="160" y1="330" x2="230" y2="330" stroke="currentColor" stroke-width="1.6" marker-end="url(#arrow)"/>
+      <text x="195" y="316" text-anchor="middle" class="arrow-label">POST /</text>
+
+      <line x1="400" y1="330" x2="470" y2="330" stroke="currentColor" stroke-width="1.6" marker-end="url(#arrow)"/>
+      <text x="435" y="316" text-anchor="middle" class="arrow-label">invoke</text>
+
+      <!-- Lambda -> intégrations réelles (plein) -->
+      <rect x="330" y="426" width="170" height="70" rx="10" fill="var(--surface)" stroke="currentColor" stroke-width="1.3"/>
+      <text x="415" y="452" text-anchor="middle" class="box-title">Amazon Bedrock</text>
+      <text x="415" y="469" text-anchor="middle" class="box-sub">Claude Haiku 4.5</text>
+      <text x="415" y="484" text-anchor="middle" class="box-sub">même modèle que Phase 0</text>
+
+      <rect x="530" y="426" width="150" height="70" rx="10" fill="var(--surface)" stroke="currentColor" stroke-width="1.3"/>
+      <text x="605" y="452" text-anchor="middle" class="box-title">DynamoDB</text>
+      <text x="605" y="469" text-anchor="middle" class="box-sub">fulfillments</text>
+      <text x="605" y="484" text-anchor="middle" class="box-sub">GetItem</text>
+
+      <rect x="710" y="426" width="140" height="70" rx="10" fill="var(--surface)" stroke="currentColor" stroke-width="1.3"/>
+      <text x="780" y="452" text-anchor="middle" class="box-title">HubSpot</text>
+      <text x="780" y="469" text-anchor="middle" class="box-sub">(externe, pas AWS)</text>
+      <text x="780" y="484" text-anchor="middle" class="box-sub">Deals · Tickets</text>
+
+      <line x1="520" y1="376" x2="440" y2="426" stroke="currentColor" stroke-width="1.6" marker-end="url(#arrow)"/>
+      <text x="455" y="403" text-anchor="middle" class="arrow-label">InvokeModel</text>
+
+      <line x1="580" y1="376" x2="600" y2="426" stroke="currentColor" stroke-width="1.6" marker-end="url(#arrow)"/>
+      <text x="620" y="403" text-anchor="middle" class="arrow-label">GetItem</text>
+
+      <line x1="640" y1="376" x2="770" y2="426" stroke="currentColor" stroke-width="1.6" marker-end="url(#arrow)"/>
+      <text x="730" y="403" text-anchor="middle" class="arrow-label">read + write</text>
+
+      <!-- Lambda -> Phase 2/3 (pointillé, pas encore construit) -->
+      <line x1="540" y1="286" x2="430" y2="246" stroke="currentColor" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+      <text x="450" y="268" text-anchor="middle" class="arrow-label">RAG (prévu)</text>
+
+      <line x1="630" y1="286" x2="700" y2="246" stroke="currentColor" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+      <text x="690" y="268" text-anchor="middle" class="arrow-label">traces (prévu)</text>
+    </svg>
+  </div>
+  <figcaption>Le seul composant qui traverse les deux phases sans changer est Bedrock (Claude Haiku 4.5) : c'est la même carte produit, le même raisonnement, local ou déployé. API Gateway, Lambda et DynamoDB n'existent qu'à partir de la Phase 1, et HubSpot n'est interrogé pour de vrai qu'à ce moment-là — en Phase 0, ces trois outils étaient des dictionnaires Python en dur, sans aucun appel réseau. Le RAG (Phase 2) et l'observabilité (Phase 3) restent à construire.</figcaption>
+</figure>
+
+<div class="legend">
+  <span><svg width="28" height="2" viewBox="0 0 28 2"><line x1="0" y1="1" x2="28" y2="1" stroke="currentColor" stroke-width="1.6"/></svg> connexion réelle, déjà construite</span>
+  <span><svg width="28" height="2" viewBox="0 0 28 2"><line x1="0" y1="1" x2="28" y2="1" stroke="currentColor" stroke-width="1.4" stroke-dasharray="5 4"/></svg> prévu, pas encore branché</span>
+  <span><svg width="14" height="14" viewBox="0 0 14 14"><rect x="1" y="1" width="12" height="12" rx="3" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/></svg> seul composant présent à toutes les phases</span>
+</div>
