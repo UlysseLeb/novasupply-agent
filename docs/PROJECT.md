@@ -70,7 +70,13 @@ Validation de bout en bout via `curl` sur l'URL API Gateway déployée : l'agent
 
 **Suite d'évaluation ajoutée le 2026-10-04** (`src/evals.py`) : contrairement à `run_tests.py` (lecture humaine du texte), ce script vérifie par assertion quels outils l'agent a réellement appelés pour chaque cas (extraction depuis `agent.messages`, blocs `toolUse`), et échoue si le comportement dérive. 4 cas : signal secondaire noyé, question de politique simple, question hors périmètre (aucun outil ne doit être appelé), et un cas informationnel (écart réel sans plainte explicite — hors score, comportement volontairement pas encore tranché).
 
-Prochaine étape : Phase 2, RAG réel via Bedrock Knowledge Base (remplacement du stub `search_policy`).
+**Phase 2 validée le 2026-10-04** : 4 documents de procédure courts rédigés (`knowledge-base/` : remboursement, délai de réclamation, seuil de validation humaine à 200€, procédure menace légale). Infra CDK ajoutée : bucket S3 pour les documents sources, bucket + index **S3 Vectors** (pas OpenSearch Serverless, qui facture un minimum même à l'arrêt — point de vigilance coût résolu), rôle IAM dédié au service Bedrock Knowledge Base, `CfnKnowledgeBase` + `CfnDataSource`. Modèle d'embedding : Titan Embed Text v2 (dimension 1024, doit matcher la dimension déclarée sur l'index). Ingestion des 4 documents déclenchée manuellement après déploiement (`start-ingestion-job`, CloudFormation crée la ressource mais ne lance pas le traitement). `search_policy` appelle désormais `bedrock-agent-runtime.retrieve()` au lieu du matching par mot-clé.
+
+Bug rencontré et corrigé : le premier déploiement a échoué (`CREATE_FAILED` sur `KbVectorIndex`, nom de bucket vectoriel trop long — `.ref` renvoie l'ARN, pas le nom court, il faut le passer explicitement). Deuxième échec : `AccessDenied` sur `s3vectors:QueryVectors`, parce que `CfnKnowledgeBase` référence le rôle IAM via `role_arn` (dépendance CloudFormation implicite sur la ressource Role) mais pas sur sa policy inline (ressource séparée) — corrigé avec une dépendance explicite (`knowledge_base.node.add_dependency(kb_role)`).
+
+Validé : une requête avec un synonyme ("plainte" au lieu de "réclamation") retrouve le bon document par recherche sémantique, alors que le matching par mot-clé de la Phase 0/1 aurait échoué — testé en local et via l'API Lambda déployée. Cas ajouté à `src/evals.py`.
+
+Prochaine étape : Phase 3, guardrails et observabilité (Bedrock Guardrail, table `traces` structurée).
 
 ## Liens
 

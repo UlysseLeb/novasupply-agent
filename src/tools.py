@@ -1,11 +1,11 @@
 """Outils de l'agent NovaSupply Ops.
 
-Phase 1 : get_order_context et escalate_to_human appellent le vrai HubSpot
-(même modèle de données que novasupply-inbox-ai) et la vraie table DynamoDB
-`fulfillments`. search_policy reste mocké jusqu'à la vraie Knowledge Base
-Bedrock (Phase 2). Les docstrings ci-dessous sont lues par le décorateur
-@tool pour générer la description que le modèle voit : elles doivent rester
-précises, c'est ce qui guide le choix de l'agent.
+get_order_context et escalate_to_human appellent le vrai HubSpot (même
+modèle de données que novasupply-inbox-ai) et la vraie table DynamoDB
+`fulfillments` (Phase 1). search_policy fait une vraie recherche sémantique
+sur une Knowledge Base Bedrock (Phase 2). Les docstrings ci-dessous sont
+lues par le décorateur @tool pour générer la description que le modèle
+voit : elles doivent rester précises, c'est ce qui guide le choix de l'agent.
 """
 
 import boto3
@@ -17,7 +17,9 @@ from strands import tool
 import hubspot_client
 
 FULFILLMENTS_TABLE_NAME = "novasupply-agent-fulfillments"
+POLICY_KNOWLEDGE_BASE_ID = "QRW0FKS6YN"
 _dynamodb = boto3.resource("dynamodb", region_name="eu-west-3")
+_bedrock_agent_runtime = boto3.client("bedrock-agent-runtime", region_name="eu-west-3")
 
 
 # Le décorateur @tool va lire deux choses sur cette fonction pour construire
@@ -63,32 +65,32 @@ def get_order_context(order_ref: str) -> str:
 
 @tool
 def search_policy(query: str) -> str:
-    """Cherche une politique interne (remboursement, délai de réclamation, etc.) correspondant à une requête en langage naturel.
+    """Cherche une politique interne (remboursement, délai de réclamation, seuil de validation humaine, menace légale) correspondant à une requête en langage naturel.
 
     Indépendant de toute commande précise : la même règle vaut pour tous les clients
     (contrairement à get_order_context, qui lui dépend d'une commande donnée).
-    Phase 0 : correspondance par mot-clé sur un petit jeu de politiques en dur,
-    en attendant la vraie Knowledge Base Bedrock (Phase 2).
+    Phase 2 : vraie recherche sémantique (RAG) sur une Knowledge Base Bedrock,
+    pas du matching par mot-clé — une question qui utilise un synonyme (ex:
+    "plainte" au lieu de "réclamation") trouve quand même le bon document.
 
     Args:
-        query: Question ou sujet recherché (ex: "quel est le délai de réclamation ?")
+        query: Question ou sujet recherché (ex: "quel est le délai pour faire une plainte ?")
     """
-    # .lower() neutralise la casse (majuscule/minuscule) mais pas les accents :
-    # "É" et "é" deviennent identiques, mais "é" et "e" restent deux caractères
-    # différents pour Python. Le mot-clé cherché doit donc garder son accent
-    # pour matcher une vraie phrase française (ex: "réclamation", pas "reclamation").
-    query_lower = query.lower()
+    response = _bedrock_agent_runtime.retrieve(
+        knowledgeBaseId=POLICY_KNOWLEDGE_BASE_ID,
+        retrievalQuery={"text": query},
+        retrievalConfiguration={"vectorSearchConfiguration": {"numberOfResults": 2}},
+    )
+    results = response["retrievalResults"]
 
-    # `in` vérifie une sous-chaîne, pas une égalité exacte : ça permet de retrouver
-    # le mot-clé peu importe comment la phrase est tournée autour de lui.
-    if "réclamation" in query_lower:
-        return "Délai de réclamation : 3 semaines après réception de la commande."
-    if "remboursement" in query_lower:
-        return "Politique de remboursement : remboursement intégral sous 1 semaine si le produit est défectueux."
+    # Filet de sécurité : si rien ne ressort (requête hors sujet), on le dit
+    # explicitement plutôt que de renvoyer une liste vide à l'agent.
+    if not results:
+        return "Aucune politique interne trouvée pour cette requête."
 
-    # Filet de sécurité : si aucun mot-clé ne matche, on le dit explicitement
-    # plutôt que de renvoyer None ou une erreur, pour que l'agent sache quoi faire de cette absence.
-    return "Aucune politique interne trouvée pour cette requête."
+    # On renvoie les 2 meilleurs passages bruts (avec leur score de similarité) :
+    # c'est à l'agent de juger lequel est pertinent, pas à cette fonction de trancher.
+    return "\n---\n".join(f"(score {r['score']:.2f}) {r['content']['text']}" for r in results)
 
 
 @tool

@@ -52,6 +52,12 @@ CASES = [
         must_not_call={"get_order_context", "escalate_to_human"},
     ),
     EvalCase(
+        name="Question de politique formulée avec un synonyme (RAG vs mot-clé)",
+        message="Quel est le délai pour faire une plainte sur une commande ?",
+        must_call={"search_policy"},
+        must_not_call={"get_order_context", "escalate_to_human"},
+    ),
+    EvalCase(
         name="Question hors périmètre (pas d'outil pertinent)",
         message="Quelle est la capitale de la France ?",
         must_not_call={"get_order_context", "search_policy", "escalate_to_human"},
