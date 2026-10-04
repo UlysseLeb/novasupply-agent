@@ -1,14 +1,23 @@
 """Outils de l'agent NovaSupply Ops.
 
-Phase 0 : données mockées en dur, pas d'appel HubSpot ni DynamoDB réel.
-Les docstrings ci-dessous sont lues par le décorateur @tool pour générer
-la description que le modèle voit : elles doivent rester précises, c'est
-ce qui guide le choix de l'agent.
+Phase 1 : get_order_context et escalate_to_human appellent le vrai HubSpot
+(même modèle de données que novasupply-inbox-ai) et la vraie table DynamoDB
+`fulfillments`. search_policy reste mocké jusqu'à la vraie Knowledge Base
+Bedrock (Phase 2). Les docstrings ci-dessous sont lues par le décorateur
+@tool pour générer la description que le modèle voit : elles doivent rester
+précises, c'est ce qui guide le choix de l'agent.
 """
+
+import boto3
 
 # `tool` est le décorateur fourni par Strands. C'est lui qui transforme une
 # fonction Python normale en "outil" que l'agent peut voir et choisir d'appeler.
 from strands import tool
+
+import hubspot_client
+
+FULFILLMENTS_TABLE_NAME = "novasupply-agent-fulfillments"
+_dynamodb = boto3.resource("dynamodb", region_name="eu-west-3")
 
 
 # Le décorateur @tool va lire deux choses sur cette fonction pour construire
@@ -26,39 +35,29 @@ def get_order_context(order_ref: str) -> str:
     dans le routage if/else figé qu'on cherche justement à remplacer.)
 
     Args:
-        order_ref: Référence de la commande (ex: "ORD-1042")
+        order_ref: Référence de la commande (ex: "CMD-4006")
     """
-    # Mock Phase 0 : une seule commande en dur, avec un écart volontaire
-    # sur un des deux produits pour tester que l'agent le détecte seul,
-    # sans qu'aucune règle ne lui dise explicitement "il y a un écart ici".
-    mocked_orders = {
-        "ORD-1042": {
-            # Ce que le client a commandé, normalement lu depuis HubSpot (Contact -> Deal -> line items).
-            "hubspot_line_items": [
-                {"sku": "SKU-VLV-200", "name": "Vanne de régulation 2 pouces", "quantity_ordered": 3},
-                {"sku": "SKU-CAP-050", "name": "Capteur de pression 0-50 bar", "quantity_ordered": 5},
-            ],
-            # Ce qui a réellement été expédié, normalement lu depuis la table DynamoDB `fulfillments`
-            # (donnée simulée : NovaSupply n'a pas de vrai système d'entrepôt).
-            "dynamodb_fulfillments": [
-                {"sku": "SKU-VLV-200", "quantity_shipped": 3},
-                {"sku": "SKU-CAP-050", "quantity_shipped": 3},  # écart : 3 expédiés au lieu de 5 commandés
-            ],
-        },
-    }
-
-    # .get() plutôt que mocked_orders[order_ref] : évite un crash si la référence
-    # n'existe pas, et permet de renvoyer un message clair à l'agent à la place.
-    order = mocked_orders.get(order_ref)
-    if order is None:
+    # Le dealname HubSpot EST la référence de commande (pas de propriété séparée) :
+    # même modèle que novasupply-inbox-ai, pour ne pas dupliquer de donnée.
+    deal = hubspot_client.find_deal_by_order_ref(order_ref)
+    if deal is None:
         return f"Aucune commande trouvée pour la référence '{order_ref}'."
+
+    ordered_items = hubspot_client.get_ordered_line_items(deal["id"])
+
+    # Ce qui a réellement été expédié ne vient jamais de HubSpot (un CRM ne sait
+    # pas ce qui est sorti de l'entrepôt) : donnée simulée dans DynamoDB,
+    # NovaSupply n'ayant pas de vrai système d'entrepôt.
+    table = _dynamodb.Table(FULFILLMENTS_TABLE_NAME)
+    fulfillment = table.get_item(Key={"order_ref": order_ref}).get("Item")
+    shipped_items = fulfillment["shipped_products"] if fulfillment else []
 
     # On renvoie du texte brut (pas un objet structuré) car c'est ce que Strands
     # attend en sortie d'outil : un texte que le modèle va lire et interpréter lui-même.
     return (
         f"Commande {order_ref}\n"
-        f"Commandé (HubSpot) : {order['hubspot_line_items']}\n"
-        f"Expédié (DynamoDB fulfillments) : {order['dynamodb_fulfillments']}"
+        f"Commandé (HubSpot) : {ordered_items}\n"
+        f"Expédié (DynamoDB fulfillments) : {shipped_items}"
     )
 
 
@@ -96,9 +95,8 @@ def search_policy(query: str) -> str:
 def escalate_to_human(reason: str, order_ref: str) -> str:
     """Escalade une question ou un problème à un humain.
 
-    Phase 0 : mock qui renvoie juste une confirmation textuelle.
-    Plus tard (Phase 1), ça créera un vrai Ticket HubSpot plutôt qu'une table
-    DynamoDB dédiée, puisque HubSpot a déjà un objet fait pour ça (Service Hub).
+    Crée un vrai Ticket HubSpot (Service Hub) plutôt qu'une table DynamoDB
+    dédiée : HubSpot a déjà un objet fait pour ça.
 
     Args:
         reason: La raison de l'escalade (ex: "écart de quantité répété").
@@ -106,4 +104,8 @@ def escalate_to_human(reason: str, order_ref: str) -> str:
     """
     # C'est l'agent qui décide QUAND appeler cette fonction (ex: après avoir vu
     # un écart via get_order_context), pas une règle if/else écrite à l'avance.
-    return f"Escalade demandée pour la commande {order_ref} : {reason}"
+    ticket_id = hubspot_client.create_ticket(
+        subject=f"Escalade commande {order_ref}",
+        content=reason,
+    )
+    return f"Ticket HubSpot {ticket_id} créé pour la commande {order_ref} : {reason}"
