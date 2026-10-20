@@ -1,88 +1,88 @@
 # NovaSupply Ops Agent
 
-Un agent IA qui traite les emails de support d'un distributeur B2B fictif (NovaSupply), en décidant lui-même quels outils appeler et dans quel ordre — au lieu d'un routage `if/else` figé sur une seule classification.
+An AI agent that handles support emails for a fictional B2B distributor (NovaSupply), deciding on its own which tools to call and in what order, instead of a fixed `if/else` route built on a single classification.
 
-## Le problème
+## The problem
 
-[novasupply-inbox-ai](https://github.com/UlysseLeb/novasupply-inbox-ai) est un pipeline existant (n8n) qui classe chaque email puis applique une règle de routage fixe. Limite : la règle ne regarde que la sortie de classification, jamais le contenu complet de l'email une seconde fois. Un signal secondaire noyé dans un message par ailleurs simple n'est jamais traité :
+[novasupply-inbox-ai](https://github.com/UlysseLeb/novasupply-inbox-ai) is an existing pipeline (n8n) that classifies each email and then applies a fixed routing rule. Its limit: the rule only ever looks at the classification output, never the email's full content a second time. A secondary signal buried inside an otherwise simple message never gets handled:
 
-> « Comment je fais pour réinitialiser mon mot de passe sur le portail commande ? Au fait, c'est la troisième fois en deux mois que ma commande arrive avec des pièces manquantes, à ce rythme je vais regarder ailleurs. »
+> "How do I reset my password on the order portal? By the way, this is the third time in two months my order arrives with missing parts, at this rate I'm going to look elsewhere."
 
-Une règle `if/else` classerait ce message « simple ». Un agent qui lit le message en entier peut remarquer la plainte, vérifier l'historique réel du client, et décider seul s'il faut escalader.
+An `if/else` rule would classify this message as "simple". An agent that reads the whole message can notice the complaint, check the customer's actual history, and decide on its own whether to escalate.
 
-## Ce que fait l'agent
+## What the agent does
 
-Trois outils, décrits au modèle via leur docstring (lue par le décorateur `@tool` de [Strands Agents](https://github.com/strands-agents/sdk-python)) :
+Three tools, described to the model through their docstring (read by [Strands Agents](https://github.com/strands-agents/sdk-python)'s `@tool` decorator):
 
-| Outil | Rôle | Source |
+| Tool | Role | Source |
 |---|---|---|
-| `get_order_context(order_ref)` | Ramène ce qui a été commandé et ce qui a réellement été expédié — sans comparer lui-même, c'est à l'agent de repérer un écart | HubSpot (Deal → line items) + DynamoDB `fulfillments` |
-| `search_policy(query)` | Recherche sémantique sur les procédures internes (remboursement, délai de réclamation, menace légale) — retrouve un synonyme sans liste de mots-clés écrite à la main | Bedrock Knowledge Base (S3 Vectors) |
-| `escalate_to_human(reason, order_ref)` | Transfère le dossier à un humain | Ticket HubSpot (Service Hub) |
+| `get_order_context(order_ref)` | Returns what was ordered and what was actually shipped, without comparing them itself, it's up to the agent to spot a discrepancy | HubSpot (Deal → line items) + DynamoDB `fulfillments` |
+| `search_policy(query)` | Semantic search over internal procedures (refunds, claim deadlines, legal threats), finds a synonym without a hand-written keyword list | Bedrock Knowledge Base (S3 Vectors) |
+| `escalate_to_human(reason, order_ref)` | Hands the case off to a human | HubSpot Ticket (Service Hub) |
 
-Aucun orchestrateur custom ne décide quel outil appeler : c'est le modèle (Claude Haiku 4.5 via Amazon Bedrock) qui choisit, à partir de sa description et du message reçu.
+No custom orchestrator decides which tool to call: the model (Claude Haiku 4.5 via Amazon Bedrock) chooses, based on its description and the message it receives.
 
-## Exemple réel
+## Real example
 
-Testé sur une vraie commande HubSpot (`CMD-4006`, 10 unités de CAP-100 commandées, 7 expédiées) :
+Tested on a real HubSpot order (`CMD-4006`, 10 units of CAP-100 ordered, 7 shipped):
 
 ```
-→ "Je voulais réinitialiser mon mot de passe. Au fait, ma commande CMD-4006
-   est arrivée avec des pièces manquantes, la troisième fois en deux mois."
+→ "I wanted to reset my password. By the way, my order CMD-4006
+   arrived with missing parts, the third time in two months."
 
-← L'agent appelle get_order_context, trouve l'écart réel (3 unités manquantes),
-  puis escalate_to_human → crée un vrai Ticket HubSpot (#436294178012).
+← The agent calls get_order_context, finds the real discrepancy (3 missing
+  units), then escalate_to_human → creates a real HubSpot Ticket (#436294178012).
 ```
 
-## Garde-fous
+## Guardrails
 
-- **Guardrail Bedrock** : bloque toute réponse qui ressemblerait à un conseil juridique ou une reconnaissance de responsabilité (testé par injection de prompt adversariale, pas juste un message normal), et anonymise les données personnelles (email, téléphone) dans les réponses.
-- **Suite d'évaluation** (`src/evals.py`) : vérifie par assertion quels outils l'agent a réellement appelés pour chaque cas, pas une relecture humaine du texte. 5/5 cas passent, dont un garde-fou anti-sur-déclenchement (une question hors périmètre ne doit appeler aucun outil).
-- **Observabilité** : chaque requête écrit une trace (outils appelés, décision finale, latence) dans une table DynamoDB.
+- **Bedrock Guardrail**: blocks any response that resembles legal advice or an admission of liability (tested through adversarial prompt injection, not just a normal message), and anonymizes personal data (email, phone) in responses.
+- **Eval suite** (`src/evals.py`): checks by assertion which tools the agent actually called for each case, not a human reading the text. 5/5 cases pass, including a guard against over-triggering (an out-of-scope question should call no tool at all).
+- **Observability**: every request writes a trace (tools called, final decision, latency) to a DynamoDB table.
 
 ## Stack
 
 Python · [Strands Agents](https://github.com/strands-agents/sdk-python) · Amazon Bedrock (Claude Haiku 4.5, Titan Embeddings, Knowledge Base, Guardrails) · AWS Lambda + API Gateway (HTTP API) · DynamoDB · S3 Vectors · HubSpot API · AWS CDK (Python)
 
-**S3 Vectors plutôt qu'OpenSearch Serverless** pour le vector store de la Knowledge Base : OpenSearch Serverless facture un minimum fixe même à l'arrêt (~300-700$/mois), S3 Vectors (sorti en décembre 2025) est payé à l'usage, sans infrastructure à gérer.
+**S3 Vectors instead of OpenSearch Serverless** for the Knowledge Base's vector store: OpenSearch Serverless bills a fixed minimum even when idle (~$300-700/month), S3 Vectors (released December 2025) is pay-per-use, with no infrastructure to manage.
 
 ## Architecture
 
-Schéma de l'infrastructure réelle par phase (pas le plan initial, ce qui tourne vraiment) : [voir l'artefact](https://claude.ai/artifact/JmC1Jk61bKFFhz43yuGBqP).
+Diagram of the real infrastructure by phase (not the initial plan, what actually runs): [see the artifact](https://claude.ai/artifact/JmC1Jk61bKFFhz43yuGBqP).
 
-## Statut
+## Status
 
-Les 4 phases prévues sont construites et validées de bout en bout (local + déploiement réel) :
+All 4 planned phases are built and validated end to end (local + real deployment):
 
-- **Phase 0** — prototype local, 3 outils stubbés, validation du choix autonome d'outils.
-- **Phase 1** — déploiement Lambda + API Gateway via CDK, connexion HubSpot réelle.
-- **Phase 2** — RAG réel sur Bedrock Knowledge Base (S3 Vectors).
-- **Phase 3** — Guardrail Bedrock + observabilité (table `traces`).
+- **Phase 0** — local prototype, 3 stubbed tools, validating the autonomous tool-choice pattern.
+- **Phase 1** — Lambda + API Gateway deployment via CDK, real HubSpot connection.
+- **Phase 2** — real RAG on Bedrock Knowledge Base (S3 Vectors).
+- **Phase 3** — Bedrock Guardrail + observability (`traces` table).
 
-Détail complet des décisions et des bugs rencontrés dans [`docs/PROJECT.md`](docs/PROJECT.md).
+Full detail on decisions and bugs encountered in [`docs/PROJECT.md`](docs/PROJECT.md).
 
-## Lancer en local
+## Running locally
 
 ```bash
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-# .env à la racine avec HUBSPOT_PRIVATE_APP_TOKEN=...
-cd src && python3 run_tests.py   # démo lisible
-python3 evals.py                 # suite d'évaluation automatisée
+# .env at the project root with HUBSPOT_PRIVATE_APP_TOKEN=...
+cd src && python3 run_tests.py   # readable demo
+python3 evals.py                 # automated eval suite
 ```
 
-## Déployer
+## Deploying
 
 ```bash
 cd infra
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cdk bootstrap && cdk deploy
-# puis déclencher l'ingestion de la Knowledge Base (CloudFormation ne le fait pas) :
+# then trigger the Knowledge Base ingestion (CloudFormation doesn't do it):
 aws bedrock-agent start-ingestion-job --knowledge-base-id <id> --data-source-id <id>
 ```
 
-## Limites connues
+## Known limitations
 
-- Permissions IAM volontairement larges pour ce prototype perso (plusieurs policies `*FullAccess`), à resserrer avant tout usage pour un vrai client.
-- Un écart de commande détecté sans plainte explicite du client déclenche quand même une escalade — comportement pas encore tranché, documenté dans `docs/PROJECT.md`.
+- IAM permissions are intentionally broad for this personal prototype (several `*FullAccess` policies), to be tightened before any real client use.
+- An order discrepancy detected without an explicit customer complaint still triggers an escalation, a behavior not yet settled, documented in `docs/PROJECT.md`.
