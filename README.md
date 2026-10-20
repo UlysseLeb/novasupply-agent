@@ -34,6 +34,23 @@ Tested on a real HubSpot order (`CMD-4006`, 10 units of CAP-100 ordered, 7 shipp
   units), then escalate_to_human → creates a real HubSpot Ticket (#436294178012).
 ```
 
+## Sourced retrieval
+
+`search_policy` does real semantic search against a Bedrock Knowledge Base, not keyword matching. Querying with a word the policy documents never use:
+
+```
+→ "quel est le délai pour faire une plainte sur une commande ?"
+   (asks about a "plainte", a complaint; the indexed document below never uses that word)
+
+← (score 0.68) "# Délai de réclamation — NovaSupply
+   Un client dispose de 3 semaines après la date de réception d'une commande
+   pour signaler un écart, une pièce manquante, ou un défaut, et ouvrir une
+   réclamation (également appelée plainte ou litige selon la formulation du
+   client). [...]"
+```
+
+The retrieved document is titled "Délai de réclamation" ("claim deadline") and is matched by embedding similarity, not by a hand-written keyword list, which is also why it reads, almost on cue, "also called a complaint or dispute depending on how the customer phrases it."
+
 ## Guardrails
 
 - **Bedrock Guardrail**: blocks any response that resembles legal advice or an admission of liability (tested through adversarial prompt injection, not just a normal message), and anonymizes personal data (email, phone) in responses.
